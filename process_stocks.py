@@ -95,10 +95,10 @@ def get_sp500_benchmark(start_date, end_date):
 def calculate_aligned_returns(stock_prices, sp500_prices):
     """Calculate stock returns relative to S&P 500 benchmark"""
     if not stock_prices or not sp500_prices:
-        return None, None
+        return None, None, None
     
     if len(stock_prices) < 252 or len(sp500_prices) < 252:  # Need at least 1 year
-        return None, None
+        return None, None, None
     
     # Sort by timestamp
     stock_prices = sorted(stock_prices, key=lambda x: x['t'])
@@ -117,7 +117,7 @@ def calculate_aligned_returns(stock_prices, sp500_prices):
     aligned = stock_df.join(spy_df, rsuffix='_spy', how='inner')
     
     if len(aligned) < 252:  # Need sufficient aligned data
-        return None, None
+        return None, None, None
     
     # Get current prices
     current_stock = aligned['c'].iloc[-1]
@@ -198,7 +198,7 @@ def format_return(return_val):
     return f"{return_val*100:.1f}%"
 
 def main():
-    print("=== IBD-Style Relative Strength Stock Processor ===")
+    print("=== IBD-Style Relative Strength Stock Processor (FULL REBUILD) ===")
     print("Using discovered formula: RS = 2×(3m relative) + 6m + 9m + 12m relative performance vs S&P 500")
     
     if not API_KEY:
@@ -234,6 +234,7 @@ def main():
     print(f"Processing {len(tickers)} stocks...")
     
     all_stock_data = []
+    historical_stocks = []  # Store historical data for daily updates
     processed = 0
     failed = 0
     
@@ -263,6 +264,14 @@ def main():
                         'stock_return_3m': stock_returns['3m'],
                         'stock_return_12m': stock_returns['12m']
                     })
+                    
+                    # Store historical data for daily updates
+                    historical_stocks.append({
+                        'symbol': ticker,
+                        'price_history': stock_prices[-300:],  # Keep last 300 days only
+                        'last_updated': datetime.now().isoformat()
+                    })
+                    
                     processed += 1
                 else:
                     failed += 1
@@ -310,12 +319,13 @@ def main():
                 'stock_return_12m': format_return(stock['stock_return_12m'])
             })
         
-        # Save to JSON file
+        # Save main rankings JSON file
         output = {
             'last_updated': datetime.now().isoformat(),
             'formula_used': 'RS = 2×(3m relative vs S&P500) + 6m + 9m + 12m relative performance',
             'total_stocks': len(output_data),
             'benchmark': 'S&P 500 (SPY)',
+            'update_type': 'full_rebuild',
             'data': output_data
         }
         
@@ -323,6 +333,19 @@ def main():
             json.dump(output, f, indent=2)
         
         print(f"✅ Successfully saved {len(output_data)} stocks to 'rankings.json'")
+        
+        # Save historical data for daily updates
+        historical_output = {
+            'last_updated': datetime.now().isoformat(),
+            'sp500_data': sp500_data[-300:],  # Keep last 300 days of SPY data
+            'total_stocks': len(historical_stocks),
+            'stocks': historical_stocks
+        }
+        
+        with open('historical_data.json', 'w') as f:
+            json.dump(historical_output, f, indent=2)
+        
+        print(f"✅ Historical data saved for daily updates ({len(historical_stocks)} stocks)")
         
         # Show top performers
         print(f"\n🏆 Top 20 IBD-Style RS Rankings:")
