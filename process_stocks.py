@@ -319,10 +319,10 @@ def main():
             'data': output_data
         }
         
-        with open('ibd_style_rankings.json', 'w') as f:
+        with open('rankings.json', 'w') as f:
             json.dump(output, f, indent=2)
         
-        print(f"✅ Successfully saved {len(output_data)} stocks to 'ibd_style_rankings.json'")
+        print(f"✅ Successfully saved {len(output_data)} stocks to 'rankings.json'")
         
         # Show top performers
         print(f"\n🏆 Top 20 IBD-Style RS Rankings:")
