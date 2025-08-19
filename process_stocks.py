@@ -265,11 +265,31 @@ def main():
                         'stock_return_12m': stock_returns['12m']
                     })
                     
-                    # Store historical data for daily updates
+                    # Store ultra-minimal historical data (only what we need for RS calculations)
+                    # Only store every 5th day to reduce size, plus recent 30 days for volume calc
+                    minimal_history = []
+                    
+                    # Get every 5th day for older data (for RS calculation periods)
+                    older_data = stock_prices[:-30:5]  # Every 5th day, excluding recent 30
+                    for price in older_data:
+                        minimal_history.append({
+                            't': price['t'],
+                            'c': price['c']  # Only closing price, no volume for old data
+                        })
+                    
+                    # Get all recent 30 days (for volume calculation)
+                    recent_data = stock_prices[-30:]
+                    for price in recent_data:
+                        minimal_history.append({
+                            't': price['t'],
+                            'c': price['c'],
+                            'v': price['v']  # Include volume for recent data
+                        })
+                    
                     historical_stocks.append({
-                        'symbol': ticker,
-                        'price_history': stock_prices[-300:],  # Keep last 300 days only
-                        'last_updated': datetime.now().isoformat()
+                        's': ticker,  # Shorter field name
+                        'h': minimal_history,  # Shorter field name
+                        'u': datetime.now().isoformat()  # Shorter field name
                     })
                     
                     processed += 1
@@ -334,12 +354,22 @@ def main():
         
         print(f"✅ Successfully saved {len(output_data)} stocks to 'rankings.json'")
         
-        # Save historical data for daily updates
+        # Save ultra-minimal historical data 
+        minimal_spy_data = []
+        # SPY data: every 5th day for older data, all recent 30 days
+        older_spy = sp500_data[:-30:5]
+        recent_spy = sp500_data[-30:]
+        
+        for bar in older_spy:
+            minimal_spy_data.append({'t': bar['t'], 'c': bar['c']})
+        for bar in recent_spy:
+            minimal_spy_data.append({'t': bar['t'], 'c': bar['c'], 'v': bar['v']})
+        
         historical_output = {
-            'last_updated': datetime.now().isoformat(),
-            'sp500_data': sp500_data[-300:],  # Keep last 300 days of SPY data
-            'total_stocks': len(historical_stocks),
-            'stocks': historical_stocks
+            'u': datetime.now().isoformat(),  # Shorter field names
+            's': minimal_spy_data,  # SPY data
+            'n': len(historical_stocks),  # Total stocks
+            'd': historical_stocks  # Stock data
         }
         
         with open('historical_data.json', 'w') as f:
