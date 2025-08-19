@@ -1,0 +1,49 @@
+name: Daily Quick Update
+on:
+  schedule:
+    - cron: '30 21 * * 1-5'  # Same time as your current workflow
+  workflow_dispatch:
+
+jobs:
+  daily-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests pandas numpy
+      
+      - name: Check if historical data exists
+        id: check-historical
+        run: |
+          if [ -f "historical_data.json" ]; then
+            echo "has_historical=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_historical=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run daily update (if historical data exists)
+        if: steps.check-historical.outputs.has_historical == 'true'
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python process_stocks_daily.py
+      
+      - name: Run full rebuild (if no historical data)
+        if: steps.check-historical.outputs.has_historical == 'false'
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python process_stocks.py
+      
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add rankings.json historical_data.json
+          git commit -m "Daily update $(date)" || exit 0
+          git push
