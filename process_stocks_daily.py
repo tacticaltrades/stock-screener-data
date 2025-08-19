@@ -14,7 +14,7 @@ def load_existing_data():
     try:
         with open('historical_data.json', 'r') as f:
             historical = json.load(f)
-        print(f"✅ Loaded historical data for {len(historical.get('stocks', []))} stocks")
+        print(f"✅ Loaded historical data for {len(historical.get('d', []))} stocks")
         return historical
     except FileNotFoundError:
         print("❌ No existing historical data found - run full rebuild first (process_stocks.py)")
@@ -160,7 +160,7 @@ def update_rs_calculations(historical_data, daily_data):
     print("📊 Updating RS calculations...")
     
     updated_stocks = []
-    sp500_data = historical_data.get('sp500_data', [])
+    sp500_data = historical_data.get('s', [])  # Fixed: using 's' instead of 'sp500_data'
     
     # Add new SPY data if available
     if 'SPY' in daily_data:
@@ -168,15 +168,12 @@ def update_rs_calculations(historical_data, daily_data):
         new_spy_data = {
             't': spy_bar['t'],
             'c': spy_bar['c'],
-            'v': spy_bar['v'],
-            'o': spy_bar['o'],
-            'h': spy_bar['h'],
-            'l': spy_bar['l']
+            'v': spy_bar['v']  # Only keeping essential fields like the rebuild script
         }
         sp500_data.append(new_spy_data)
         # Keep only last 300 days
         sp500_data = sp500_data[-300:]
-        historical_data['sp500_data'] = sp500_data
+        historical_data['s'] = sp500_data  # Fixed: using 's' instead of 'sp500_data'
         print(f"✅ Updated SPY benchmark data")
     else:
         print("⚠️  No SPY data available for today")
@@ -185,8 +182,8 @@ def update_rs_calculations(historical_data, daily_data):
     processed = 0
     failed = 0
     
-    for i, stock in enumerate(historical_data.get('stocks', [])):
-        symbol = stock['symbol']
+    for i, stock in enumerate(historical_data.get('d', [])):  # Fixed: using 'd' instead of 'stocks'
+        symbol = stock['s']  # Fixed: using 's' instead of 'symbol'
         
         try:
             # Add new day's data if available
@@ -195,21 +192,18 @@ def update_rs_calculations(historical_data, daily_data):
                 new_price_data = {
                     't': daily_bar['t'],
                     'c': daily_bar['c'],
-                    'v': daily_bar['v'],
-                    'o': daily_bar['o'],
-                    'h': daily_bar['h'],
-                    'l': daily_bar['l']
+                    'v': daily_bar['v']  # Only keeping essential fields like the rebuild script
                 }
                 
                 # Add to historical data
-                stock['price_history'].append(new_price_data)
+                stock['h'].append(new_price_data)  # Fixed: using 'h' instead of 'price_history'
                 
                 # Keep only last 300 days to prevent file from growing too large
-                stock['price_history'] = stock['price_history'][-300:]
-                stock['last_updated'] = datetime.now().isoformat()
+                stock['h'] = stock['h'][-300:]  # Fixed: using 'h' instead of 'price_history'
+                stock['u'] = datetime.now().isoformat()  # Fixed: using 'u' instead of 'last_updated'
                 
                 # Recalculate RS score with updated data
-                result = calculate_aligned_returns(stock['price_history'], sp500_data)
+                result = calculate_aligned_returns(stock['h'], sp500_data)  # Fixed: using 'h' instead of 'price_history'
                 if result[0] is not None:
                     relative_returns, stock_returns, avg_volume = result
                     rs_score = calculate_ibd_rs_score(relative_returns)
@@ -320,8 +314,8 @@ def main():
     
     print(f"✅ Updated rankings saved - {len(output_data)} stocks")
     
-    # Update historical data file
-    historical_data['last_updated'] = datetime.now().isoformat()
+    # Update historical data file with shorter field names structure
+    historical_data['u'] = datetime.now().isoformat()  # Fixed: using 'u' instead of 'last_updated'
     with open('historical_data.json', 'w') as f:
         json.dump(historical_data, f, indent=2)
     
