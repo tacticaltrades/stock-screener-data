@@ -32,6 +32,6 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add rankings.json
+        git add rankings.json historical_data.json
         git commit -m "Update stock rankings $(date)" || exit 0
         git push
