@@ -1,14 +1,15 @@
 name: Daily Quick Update
+
 on:
   schedule:
-    - cron: '30 21 * * 1-5'  # Same time as your current workflow
-  workflow_dispatch:
+    - cron: '30 21 * * 1-4'   # Mon-Thu 4:30 PM ET = daily update only
+  workflow_dispatch:          # Manual trigger for daily update
 
 jobs:
   daily-update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -34,13 +35,15 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: python process_stocks_daily.py
       
-      - name: Run full rebuild (if no historical data)
+      - name: Skip update (if no historical data)
         if: steps.check-historical.outputs.has_historical == 'false'
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: python process_stocks.py
+        run: |
+          echo "No historical data found. Skipping daily update."
+          echo "Full rebuild will run on Friday or can be triggered manually."
+          exit 0
       
       - name: Commit and push
+        if: steps.check-historical.outputs.has_historical == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
