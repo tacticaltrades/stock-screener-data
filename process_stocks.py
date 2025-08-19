@@ -44,6 +44,7 @@ def get_all_tickers():
                         len(symbol) <= 6 and  # Allow 6-character symbols
                         not symbol.endswith('.') and  # Avoid most preferreds
                         symbol.replace('.', '').isalnum()):  # Allow numbers in symbols
+                        us_stocks.append(symbol)
                 
                 all_tickers.extend(us_stocks)
                 print(f"Added {len(us_stocks)} tickers, total: {len(all_tickers)}")
