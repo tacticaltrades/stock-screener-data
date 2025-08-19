@@ -1,37 +1,48 @@
-name: Update Stock Data
-
+name: Stock Data Update System
 on:
   schedule:
-    # Runs at 4:30 PM ET (21:30 UTC) Monday-Friday
-    - cron: '30 21 * * 1-5'
-  workflow_dispatch: # Allows manual triggering
+    - cron: '30 21 * * 5'    # Friday 4:30 PM ET = full rebuild
+    - cron: '30 21 * * 1-4'  # Mon-Thu 4:30 PM ET = daily update
+  workflow_dispatch:
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install dependencies
-      run: |
-        pip install requests pandas numpy
-        
-    - name: Process stock data
-      env:
-        POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-      run: python process_stocks.py
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          pip install requests pandas numpy
       
-    - name: Commit and push changes
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add rankings.json historical_data.json
-        git commit -m "Update stock rankings $(date)" || exit 0
-        git push
+      - name: Determine update type
+        id: update-type
+        run: |
+          if [ "$(date +%u)" = "5" ]; then          # If it's Friday
+            echo "type=full" >> $GITHUB_OUTPUT
+            echo "script=process_stocks.py" >> $GITHUB_OUTPUT
+          elif [ -f "historical_data.json" ]; then   # If historical data exists
+            echo "type=daily" >> $GITHUB_OUTPUT
+            echo "script=process_stocks_daily.py" >> $GITHUB_OUTPUT
+          else                                       # Fallback
+            echo "type=full" >> $GITHUB_OUTPUT
+            echo "script=process_stocks.py" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run update
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: python ${{ steps.update-type.outputs.script }}
+        
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add rankings.json historical_data.json
+          git commit -m "${{ steps.update-type.outputs.type }} update $(date)" || exit 0
+          git push
