@@ -41,10 +41,9 @@ def get_all_tickers():
                     symbol = ticker.get('ticker', '')
                     if (ticker.get('market') == 'stocks' and 
                         ticker.get('locale') == 'us' and
-                        len(symbol) <= 5 and  # Avoid complex symbols
-                        '.' not in symbol and  # Avoid preferred shares
-                        symbol.isalpha()):     # Only letters
-                        us_stocks.append(symbol)
+                        len(symbol) <= 6 and  # Allow 6-character symbols
+                        not symbol.endswith('.') and  # Avoid most preferreds
+                        symbol.replace('.', '').isalnum()):  # Allow numbers in symbols
                 
                 all_tickers.extend(us_stocks)
                 print(f"Added {len(us_stocks)} tickers, total: {len(all_tickers)}")
@@ -73,7 +72,7 @@ def get_stock_data(ticker, start_date, end_date):
         response = requests.get(url, params=params)
         if response.status_code == 200:
             data = response.json()
-            if 'results' in data and len(data['results']) > 250:  # Need sufficient data
+            if 'results' in data and len(data['results']) > 200:  # Need sufficient data
                 return data['results']
         elif response.status_code == 429:  # Rate limited
             print(f"Rate limited for {ticker}, waiting...")
@@ -230,7 +229,7 @@ def main():
         return
     
     # Limit to reasonable number for processing time
-    tickers = tickers[:2500]  # Process top 2500 stocks
+    tickers = tickers[:5000]  # Process top 5000 stocks
     print(f"Processing {len(tickers)} stocks...")
     
     all_stock_data = []
