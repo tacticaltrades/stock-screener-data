@@ -1,0 +1,97 @@
+name: Update OHLC Data - Weekly Full Rebuild
+
+on:
+  schedule:
+    # Runs every Friday at 4:30 PM EST (9:30 PM UTC)
+    - cron: '30 21 * * 5'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: write  # Required to push changes
+
+jobs:
+  update-ohlc-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+    
+    - name: Check if rankings.json exists
+      run: |
+        if [ ! -f rankings.json ]; then
+          echo "Error: rankings.json not found!"
+          exit 1
+        fi
+        echo "Found rankings.json with $(jq '.data | length' rankings.json) stocks"
+    
+    - name: Run OHLC full rebuild
+      env:
+        POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      run: |
+        echo "Starting OHLC full rebuild at $(date)"
+        python process_ohlc_full.py
+        echo "OHLC full rebuild completed at $(date)"
+    
+    - name: Verify generated files
+      run: |
+        if [ -f ohlc.json ] && [ -f ohlc_historical.json ]; then
+          echo "✅ Both OHLC files generated successfully"
+          echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
+          echo "ohlc_historical.json size: $(du -h ohlc_historical.json | cut -f1)"
+          
+          # Verify JSON structure
+          echo "Verifying JSON structure..."
+          jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
+          jq -e '.data | keys | length' ohlc_historical.json > /dev/null && echo "✅ ohlc_historical.json structure valid"
+          
+          # Show summary stats
+          echo "Summary:"
+          echo "- Total symbols: $(jq -r '.total_symbols' ohlc.json)"
+          echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
+          echo "- Update type: $(jq -r '.update_type' ohlc.json)"
+        else
+          echo "❌ OHLC files not found after rebuild"
+          exit 1
+        fi
+    
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+    
+    - name: Commit and push changes
+      run: |
+        git add ohlc.json ohlc_historical.json
+        
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Weekly OHLC data full rebuild - $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+          git push
+          echo "✅ Changes committed and pushed successfully"
+        fi
+    
+    - name: Create workflow summary
+      run: |
+        echo "## OHLC Full Rebuild Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbols processed**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **File sizes**:" >> $GITHUB_STEP_SUMMARY
+        echo "  - ohlc.json: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "  - ohlc_historical.json: $(du -h ohlc_historical.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Update type**: Full rebuild" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Weekly OHLC data rebuild completed successfully" >> $GITHUB_STEP_SUMMARY
