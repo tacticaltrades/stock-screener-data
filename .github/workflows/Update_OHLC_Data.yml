@@ -1,4 +1,4 @@
-name: Update OHLC Data - Weekly Full Rebuild
+name: Update OHLC Data Full
 
 on:
   schedule:
