@@ -25,18 +25,18 @@ class OHLCDailyProcessor:
         self.base_url = "https://api.polygon.io/v2"
         self.rate_limit_delay = 0.1  # 10 requests per second
         
-    def load_historical_data(self) -> Dict[str, Any]:
-        """Load existing historical OHLC data"""
+    def load_existing_data(self) -> Dict[str, Any]:
+        """Load existing OHLC data"""
         try:
-            with open('ohlc_historical.json', 'r') as f:
+            with open('ohlc.json', 'r') as f:
                 data = json.load(f)
-            logger.info(f"Loaded historical data for {data.get('total_symbols', 0)} symbols")
+            logger.info(f"Loaded existing data for {data.get('total_symbols', 0)} symbols")
             return data
         except FileNotFoundError:
-            logger.error("ohlc_historical.json not found. Run full rebuild first.")
+            logger.error("ohlc.json not found. Run full rebuild first.")
             raise
         except Exception as e:
-            logger.error(f"Failed to load historical data: {e}")
+            logger.error(f"Failed to load existing data: {e}")
             raise
     
     def get_update_date(self) -> str:
@@ -112,10 +112,10 @@ class OHLCDailyProcessor:
         
         return updated
     
-    def process_daily_updates(self, historical_data: Dict[str, Any]) -> Dict[str, Any]:
+    def process_daily_updates(self, existing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process daily updates for all symbols"""
         update_date = self.get_update_date()
-        symbols = list(historical_data['data'].keys())
+        symbols = list(existing_data['data'].keys())
         
         logger.info(f"Starting daily update for {len(symbols)} symbols on {update_date}")
         
@@ -128,7 +128,7 @@ class OHLCDailyProcessor:
             
             if latest_bar:
                 # Update the symbol's data
-                if self.update_symbol_data(symbol, historical_data['data'][symbol], latest_bar):
+                if self.update_symbol_data(symbol, existing_data['data'][symbol], latest_bar):
                     updated_symbols += 1
             else:
                 failed_symbols += 1
@@ -143,22 +143,22 @@ class OHLCDailyProcessor:
         logger.info(f"Daily update completed: {updated_symbols} updated, {failed_symbols} failed")
         
         # Update metadata
-        historical_data['last_updated'] = datetime.now().isoformat()
-        historical_data['update_type'] = 'daily_update'
+        existing_data['last_updated'] = datetime.now().isoformat()
+        existing_data['update_type'] = 'daily_update'
         
-        return historical_data
+        return existing_data
     
     def save_updated_data(self, data: Dict[str, Any]):
-        """Save updated data to files"""
-        # Save updated historical data
-        with open('ohlc_historical.json', 'w') as f:
-            json.dump(data, f, separators=(',', ':'))
-        
-        # Create/update current ohlc.json
+        """Save updated data to single JSON file"""
+        # Save to single file
         with open('ohlc.json', 'w') as f:
             json.dump(data, f, separators=(',', ':'))
         
-        logger.info("Saved updated ohlc.json and ohlc_historical.json")
+        logger.info("Saved updated ohlc.json")
+        
+        # Log file size
+        ohlc_size = os.path.getsize('ohlc.json') / (1024 * 1024)  # MB
+        logger.info(f"File size: ohlc.json={ohlc_size:.1f}MB")d ohlc_historical.json")
         
         # Log file sizes
         ohlc_size = os.path.getsize('ohlc.json') / (1024 * 1024)  # MB
@@ -171,8 +171,8 @@ def main():
     
     try:
         processor = OHLCDailyProcessor()
-        historical_data = processor.load_historical_data()
-        updated_data = processor.process_daily_updates(historical_data)
+        existing_data = processor.load_existing_data()
+        updated_data = processor.process_daily_updates(existing_data)
         processor.save_updated_data(updated_data)
         logger.info("Daily OHLC update completed successfully")
         
