@@ -136,11 +136,11 @@ class OHLCFullProcessor:
         return all_data
     
     def save_data(self, data: Dict[str, Any]):
-        """Save data to JSON files"""
+        """Save data to single JSON file"""
         timestamp = datetime.now().isoformat()
         
-        # Create current ohlc.json
-        current_data = {
+        # Create single ohlc.json file
+        ohlc_data = {
             "last_updated": timestamp,
             "update_type": "full_rebuild",
             "total_symbols": len(data),
@@ -148,20 +148,15 @@ class OHLCFullProcessor:
             "data": data
         }
         
-        # Save current file
+        # Save to single file
         with open('ohlc.json', 'w') as f:
-            json.dump(current_data, f, separators=(',', ':'))
+            json.dump(ohlc_data, f, separators=(',', ':'))
         
-        # Save historical backup
-        with open('ohlc_historical.json', 'w') as f:
-            json.dump(current_data, f, separators=(',', ':'))
+        logger.info("Saved ohlc.json")
         
-        logger.info("Saved ohlc.json and ohlc_historical.json")
-        
-        # Log file sizes
+        # Log file size
         ohlc_size = os.path.getsize('ohlc.json') / (1024 * 1024)  # MB
-        hist_size = os.path.getsize('ohlc_historical.json') / (1024 * 1024)  # MB
-        logger.info(f"File sizes: ohlc.json={ohlc_size:.1f}MB, ohlc_historical.json={hist_size:.1f}MB")
+        logger.info(f"File size: ohlc.json={ohlc_size:.1f}MB")
 
 def main():
     """Main execution function"""
