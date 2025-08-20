@@ -29,15 +29,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
     
-    - name: Check if historical data exists
+    - name: Check if existing data exists
       run: |
-        if [ ! -f ohlc_historical.json ]; then
-          echo "Error: ohlc_historical.json not found!"
+        if [ ! -f ohlc.json ]; then
+          echo "Error: ohlc.json not found!"
           echo "Please run the weekly full rebuild first."
           exit 1
         fi
-        echo "Found ohlc_historical.json with $(jq '.total_symbols' ohlc_historical.json) symbols"
-        echo "Last updated: $(jq -r '.last_updated' ohlc_historical.json)"
+        echo "Found ohlc.json with $(jq '.total_symbols' ohlc.json) symbols"
+        echo "Last updated: $(jq -r '.last_updated' ohlc.json)"
     
     - name: Check if market is open (trading day)
       run: |
@@ -60,15 +60,13 @@ jobs:
     
     - name: Verify updated files
       run: |
-        if [ -f ohlc.json ] && [ -f ohlc_historical.json ]; then
-          echo "✅ OHLC files updated successfully"
+        if [ -f ohlc.json ]; then
+          echo "✅ OHLC file updated successfully"
           echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
-          echo "ohlc_historical.json size: $(du -h ohlc_historical.json | cut -f1)"
           
           # Verify JSON structure
           echo "Verifying JSON structure..."
           jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
-          jq -e '.data | keys | length' ohlc_historical.json > /dev/null && echo "✅ ohlc_historical.json structure valid"
           
           # Show update info
           echo "Update summary:"
@@ -76,7 +74,7 @@ jobs:
           echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
           echo "- Update type: $(jq -r '.update_type' ohlc.json)"
         else
-          echo "❌ OHLC files not found after update"
+          echo "❌ OHLC file not found after update"
           exit 1
         fi
     
@@ -87,7 +85,7 @@ jobs:
     
     - name: Check for changes and commit
       run: |
-        git add ohlc.json ohlc_historical.json
+        git add ohlc.json
         
         if git diff --staged --quiet; then
           echo "No changes detected - market may be closed or no new data available"
@@ -116,11 +114,9 @@ jobs:
         echo "- **Symbols**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
         echo "- **Last updated**: $(jq -r '.last_updated' ohlc.json)" >> $GITHUB_STEP_SUMMARY
         echo "- **Update type**: $(jq -r '.update_type' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **File sizes**:" >> $GITHUB_STEP_SUMMARY
-        echo "  - ohlc.json: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
-        echo "  - ohlc_historical.json: $(du -h ohlc_historical.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **File size**: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Check if files were updated
-        git diff --name-only HEAD~1 2>/dev/null | grep -q "ohlc" && UPDATE_STATUS="✅ Files updated" || UPDATE_STATUS="ℹ️ No changes (normal for non-trading days)"
+        git diff --name-only HEAD~1 2>/dev/null | grep -q "ohlc" && UPDATE_STATUS="✅ File updated" || UPDATE_STATUS="ℹ️ No changes (normal for non-trading days)"
         echo "**Status**: ${UPDATE_STATUS}" >> $GITHUB_STEP_SUMMARY
