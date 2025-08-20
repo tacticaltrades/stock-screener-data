@@ -1,4 +1,4 @@
-name: Daily Quick Update
+name: Daily RS Update
 
 on:
   schedule:
