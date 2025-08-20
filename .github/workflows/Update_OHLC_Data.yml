@@ -1,4 +1,4 @@
-name: Update OHLC Data Full
+name: Update OHLC Data
 
 on:
   schedule:
@@ -47,15 +47,13 @@ jobs:
     
     - name: Verify generated files
       run: |
-        if [ -f ohlc.json ] && [ -f ohlc_historical.json ]; then
-          echo "✅ Both OHLC files generated successfully"
+        if [ -f ohlc.json ]; then
+          echo "✅ OHLC file generated successfully"
           echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
-          echo "ohlc_historical.json size: $(du -h ohlc_historical.json | cut -f1)"
           
           # Verify JSON structure
           echo "Verifying JSON structure..."
           jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
-          jq -e '.data | keys | length' ohlc_historical.json > /dev/null && echo "✅ ohlc_historical.json structure valid"
           
           # Show summary stats
           echo "Summary:"
@@ -63,7 +61,7 @@ jobs:
           echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
           echo "- Update type: $(jq -r '.update_type' ohlc.json)"
         else
-          echo "❌ OHLC files not found after rebuild"
+          echo "❌ OHLC file not found after rebuild"
           exit 1
         fi
     
@@ -74,7 +72,7 @@ jobs:
     
     - name: Commit and push changes
       run: |
-        git add ohlc.json ohlc_historical.json
+        git add ohlc.json
         
         if git diff --staged --quiet; then
           echo "No changes to commit"
@@ -89,9 +87,7 @@ jobs:
         echo "## OHLC Full Rebuild Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
         echo "- **Symbols processed**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **File sizes**:" >> $GITHUB_STEP_SUMMARY
-        echo "  - ohlc.json: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
-        echo "  - ohlc_historical.json: $(du -h ohlc_historical.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **File size**: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "- **Update type**: Full rebuild" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "✅ Weekly OHLC data rebuild completed successfully" >> $GITHUB_STEP_SUMMARY
