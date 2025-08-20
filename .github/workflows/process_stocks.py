@@ -1,15 +1,17 @@
 import requests
 import json
 import os
+import time
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
-API_KEY = os.environ['POLYGON_API_KEY']
+API_KEY = os.environ.get('POLYGON_API_KEY')
 BASE_URL = "https://api.polygon.io"
 
 def get_all_tickers():
-    """Get all active stock tickers"""
+    """Get all active US stock tickers"""
+    print("Fetching all active US stock tickers...")
     url = f"{BASE_URL}/v3/reference/tickers"
     params = {
         'market': 'stocks',
@@ -19,45 +21,109 @@ def get_all_tickers():
     }
     
     all_tickers = []
+    page_count = 0
     
     while True:
-        response = requests.get(url, params=params)
-        data = response.json()
-        
-        if 'results' in data:
-            # Filter for US stocks only
-            us_stocks = [
-                ticker['ticker'] for ticker in data['results'] 
-                if ticker.get('market') == 'stocks' and 
-                ticker.get('locale') == 'us' and
-                len(ticker['ticker']) <= 5  # Avoid complex symbols
-            ]
-            all_tickers.extend(us_stocks)
-        
-        # Check for next page
-        if 'next_url' not in data:
+        try:
+            response = requests.get(url, params=params)
+            if response.status_code != 200:
+                print(f"API Error: {response.status_code} - {response.text}")
+                break
+                
+            data = response.json()
+            page_count += 1
+            print(f"Processing page {page_count}...")
+            
+            if 'results' in data:
+                # Filter for US stocks only, exclude complex symbols
+                us_stocks = []
+                for ticker in data['results']:
+                    symbol = ticker.get('ticker', '')
+                    if (ticker.get('market') == 'stocks' and 
+                        ticker.get('locale') == 'us' and
+                        len(symbol) <= 6 and  # Allow 6-character symbols
+                        not symbol.endswith('.') and  # Avoid most preferreds
+                        symbol.replace('.', '').isalnum()):  # Allow numbers in symbols
+                        us_stocks.append(symbol)
+                
+                all_tickers.extend(us_stocks)
+                print(f"Added {len(us_stocks)} tickers, total: {len(all_tickers)}")
+            
+            # Check for next page
+            if 'next_url' not in data:
+                break
+            url = data['next_url'] + f"&apikey={API_KEY}"
+            
+            # Rate limiting - be conservative
+            time.sleep(0.1)
+            
+        except Exception as e:
+            print(f"Error fetching tickers: {e}")
             break
-        url = data['next_url'] + f"&apikey={API_KEY}"
     
-    return all_tickers[:8000]  # Limit to manageable number
+    print(f"Found {len(all_tickers)} total US stocks")
+    return all_tickers
 
-def get_bulk_daily_data(date):
-    """Get all stocks data for a specific date using bulk endpoint"""
-    url = f"{BASE_URL}/v2/aggs/grouped/locale/us/market/stocks/{date}"
+def get_stock_data(ticker, start_date, end_date):
+    """Get historical data for a single stock"""
+    url = f"{BASE_URL}/v2/aggs/ticker/{ticker}/range/1/day/{start_date}/{end_date}"
     params = {'apikey': API_KEY}
     
-    response = requests.get(url, params=params)
-    return response.json()
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if 'results' in data and len(data['results']) > 200:  # Need sufficient data
+                return data['results']
+        elif response.status_code == 429:  # Rate limited
+            print(f"Rate limited for {ticker}, waiting...")
+            time.sleep(2)
+            return get_stock_data(ticker, start_date, end_date)  # Retry
+        else:
+            if response.status_code != 404:  # Don't log 404s (delisted stocks)
+                print(f"Error for {ticker}: {response.status_code}")
+    except Exception as e:
+        print(f"Exception for {ticker}: {e}")
+    
+    return None
 
-def calculate_returns(prices_df):
-    """Calculate returns for different periods"""
-    if len(prices_df) < 252:  # Need at least 1 year of data
-        return None
+def get_sp500_benchmark(start_date, end_date):
+    """Get S&P 500 benchmark data using SPY ETF"""
+    print("Fetching S&P 500 benchmark data...")
+    return get_stock_data('SPY', start_date, end_date)
+
+def calculate_aligned_returns(stock_prices, sp500_prices):
+    """Calculate stock returns relative to S&P 500 benchmark"""
+    if not stock_prices or not sp500_prices:
+        return None, None, None
     
-    current_price = prices_df.iloc[-1]['close']
+    if len(stock_prices) < 252 or len(sp500_prices) < 252:  # Need at least 1 year
+        return None, None, None
     
-    # Calculate returns (approximate trading days)
-    returns = {}
+    # Sort by timestamp
+    stock_prices = sorted(stock_prices, key=lambda x: x['t'])
+    sp500_prices = sorted(sp500_prices, key=lambda x: x['t'])
+    
+    # Create dataframes for alignment
+    stock_df = pd.DataFrame(stock_prices)
+    stock_df['date'] = pd.to_datetime(stock_df['t'], unit='ms')
+    stock_df = stock_df.set_index('date')
+    
+    spy_df = pd.DataFrame(sp500_prices)
+    spy_df['date'] = pd.to_datetime(spy_df['t'], unit='ms')
+    spy_df = spy_df.set_index('date')
+    
+    # Align dates (only trading days where both have data)
+    aligned = stock_df.join(spy_df, rsuffix='_spy', how='inner')
+    
+    if len(aligned) < 252:  # Need sufficient aligned data
+        return None, None, None
+    
+    # Get current prices
+    current_stock = aligned['c'].iloc[-1]
+    current_spy = aligned['c_spy'].iloc[-1]
+    
+    # Calculate returns for IBD periods
     periods = {
         '3m': 63,   # ~3 months
         '6m': 126,  # ~6 months  
@@ -65,159 +131,274 @@ def calculate_returns(prices_df):
         '12m': 252  # ~12 months
     }
     
-    for period, days in periods.items():
-        if len(prices_df) > days:
-            old_price = prices_df.iloc[-(days+1)]['close']
-            returns[period] = (current_price - old_price) / old_price
-        else:
-            returns[period] = 0
+    stock_returns = {}
+    relative_returns = {}
     
-    return returns
+    for period, days in periods.items():
+        if len(aligned) > days:
+            # Stock return
+            old_stock = aligned['c'].iloc[-(days+1)]
+            if old_stock > 0:
+                stock_return = (current_stock - old_stock) / old_stock
+            else:
+                stock_return = 0
+            
+            # S&P 500 return
+            old_spy = aligned['c_spy'].iloc[-(days+1)]
+            if old_spy > 0:
+                spy_return = (current_spy - old_spy) / old_spy
+            else:
+                spy_return = 0
+            
+            # Relative performance (stock return - benchmark return)
+            relative_return = stock_return - spy_return
+            
+            stock_returns[period] = stock_return
+            relative_returns[period] = relative_return
+        else:
+            stock_returns[period] = 0
+            relative_returns[period] = 0
+    
+    # Calculate average volume (last 20 days)
+    recent_volumes = [float(p['v']) for p in stock_prices[-20:] if p['v'] > 0]
+    avg_volume = sum(recent_volumes) / len(recent_volumes) if recent_volumes else 0
+    
+    return relative_returns, stock_returns, avg_volume
 
-def calculate_rs_score(returns):
-    """Calculate IBD-style RS score"""
-    if not returns:
+def calculate_ibd_rs_score(relative_returns):
+    """Calculate IBD-style RS score using the discovered formula
+    
+    Formula: RS = 2×(3-month relative) + (6-month relative) + (9-month relative) + (12-month relative)
+    Where relative = (stock return - S&P 500 return)
+    """
+    if not relative_returns:
         return 0
     
-    # RS Score = (2 × 3-month) + (1 × 6-month) + (1 × 9-month) + (1 × 12-month)
+    # IBD RS Score with 3-month period weighted 2x
     rs_score = (
-        2 * returns.get('3m', 0) +
-        1 * returns.get('6m', 0) +
-        1 * returns.get('9m', 0) +
-        1 * returns.get('12m', 0)
+        2 * relative_returns.get('3m', 0) +
+        1 * relative_returns.get('6m', 0) +
+        1 * relative_returns.get('9m', 0) +
+        1 * relative_returns.get('12m', 0)
     )
     
     return rs_score
 
-def get_sp500_return():
-    """Get S&P 500 returns for comparison"""
-    # Use SPY as S&P 500 proxy
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    
-    url = f"{BASE_URL}/v2/aggs/ticker/SPY/range/1/day/{start_date}/{end_date}"
-    params = {'apikey': API_KEY}
-    
-    response = requests.get(url, params=params)
-    data = response.json()
-    
-    if 'results' in data and len(data['results']) > 0:
-        prices = pd.DataFrame(data['results'])
-        prices['date'] = pd.to_datetime(prices['t'], unit='ms')
-        prices = prices.sort_values('date')
-        return calculate_returns(prices[['close']])
-    
-    return None
+def format_volume(volume):
+    """Format volume as XXXk or XXXm"""
+    if volume >= 1000000:
+        return f"{volume/1000000:.1f}M"
+    elif volume >= 1000:
+        return f"{volume/1000:.0f}k"
+    else:
+        return str(int(volume))
+
+def format_return(return_val):
+    """Format return as percentage"""
+    return f"{return_val*100:.1f}%"
 
 def main():
-    print("Starting stock data processing...")
+    print("=== IBD-Style Relative Strength Stock Processor (FULL REBUILD) ===")
+    print("Using discovered formula: RS = 2×(3m relative) + 6m + 9m + 12m relative performance vs S&P 500")
     
-    # Get S&P 500 benchmark returns
-    print("Getting S&P 500 benchmark data...")
-    sp500_returns = get_sp500_return()
-    if not sp500_returns:
-        print("Failed to get S&P 500 data")
+    if not API_KEY:
+        print("ERROR: POLYGON_API_KEY not found!")
+        print("Set it with: export POLYGON_API_KEY='your_key_here'")
         return
     
-    # Get recent trading dates (last 252 days)
+    # Date range for historical data (need extra buffer for alignment)
     end_date = datetime.now()
-    dates = []
-    current_date = end_date
+    start_date = end_date - timedelta(days=450)  # Extra buffer for weekends/holidays
     
-    # Generate last 300 calendar days to ensure we get 252 trading days
-    for i in range(300):
-        dates.append(current_date.strftime('%Y-%m-%d'))
-        current_date -= timedelta(days=1)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+    
+    print(f"Fetching data from {start_date_str} to {end_date_str}")
+    
+    # Get S&P 500 benchmark first
+    sp500_data = get_sp500_benchmark(start_date_str, end_date_str)
+    if not sp500_data:
+        print("ERROR: Failed to get S&P 500 benchmark data!")
+        return
+    
+    print(f"Got {len(sp500_data)} days of S&P 500 benchmark data")
     
     # Get all tickers
-    print("Getting all stock tickers...")
     tickers = get_all_tickers()
+    if not tickers:
+        print("Failed to get tickers!")
+        return
+    
+    # Limit to reasonable number for processing time
+    tickers = tickers[:5000]  # Process top 5000 stocks
     print(f"Processing {len(tickers)} stocks...")
     
     all_stock_data = []
+    historical_stocks = []  # Store historical data for daily updates
+    processed = 0
+    failed = 0
     
-    # Process in batches to avoid overwhelming the API
-    batch_size = 100
-    for i in range(0, len(tickers), batch_size):
-        batch = tickers[i:i+batch_size]
-        print(f"Processing batch {i//batch_size + 1}/{(len(tickers)-1)//batch_size + 1}")
-        
-        for ticker in batch:
-            try:
-                # Get historical data for this stock
-                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                
-                url = f"{BASE_URL}/v2/aggs/ticker/{ticker}/range/1/day/{start_date}/{end_date}"
-                params = {'apikey': API_KEY}
-                
-                response = requests.get(url, params=params)
-                data = response.json()
-                
-                if 'results' in data and len(data['results']) > 200:  # Need sufficient data
-                    prices_df = pd.DataFrame(data['results'])
-                    prices_df['date'] = pd.to_datetime(prices_df['t'], unit='ms')
-                    prices_df = prices_df.sort_values('date')
+    for i, ticker in enumerate(tickers):
+        try:
+            # Progress indicator
+            if i % 100 == 0:
+                print(f"Progress: {i}/{len(tickers)} ({i/len(tickers)*100:.1f}%) - Processed: {processed}, Failed: {failed}")
+            
+            # Get historical data
+            stock_prices = get_stock_data(ticker, start_date_str, end_date_str)
+            
+            if stock_prices:
+                result = calculate_aligned_returns(stock_prices, sp500_data)
+                if result[0] is not None:  # Check if we got valid data
+                    relative_returns, stock_returns, avg_volume = result
+                    rs_score = calculate_ibd_rs_score(relative_returns)
                     
-                    # Calculate returns
-                    returns = calculate_returns(prices_df[['close']])
-                    if returns:
-                        rs_score = calculate_rs_score(returns)
-                        
-                        # Get current volume (average of last 20 days)
-                        avg_volume = prices_df.tail(20)['v'].mean()
-                        
-                        all_stock_data.append({
-                            'symbol': ticker,
-                            'rs_score': rs_score,
-                            'avg_volume': int(avg_volume),
-                            'returns_3m': returns['3m'],
-                            'returns_6m': returns['6m'], 
-                            'returns_9m': returns['9m'],
-                            'returns_12m': returns['12m']
+                    all_stock_data.append({
+                        'symbol': ticker,
+                        'rs_score': rs_score,
+                        'avg_volume': int(avg_volume),
+                        'relative_3m': relative_returns['3m'],
+                        'relative_6m': relative_returns['6m'], 
+                        'relative_9m': relative_returns['9m'],
+                        'relative_12m': relative_returns['12m'],
+                        'stock_return_3m': stock_returns['3m'],
+                        'stock_return_12m': stock_returns['12m']
+                    })
+                    
+                    # Store ultra-minimal historical data (only what we need for RS calculations)
+                    # Only store every 5th day to reduce size, plus recent 30 days for volume calc
+                    minimal_history = []
+                    
+                    # Get every 5th day for older data (for RS calculation periods)
+                    older_data = stock_prices[:-30:5]  # Every 5th day, excluding recent 30
+                    for price in older_data:
+                        minimal_history.append({
+                            't': price['t'],
+                            'c': price['c']  # Only closing price, no volume for old data
                         })
-                
-            except Exception as e:
-                print(f"Error processing {ticker}: {e}")
-                continue
+                    
+                    # Get all recent 30 days (for volume calculation)
+                    recent_data = stock_prices[-30:]
+                    for price in recent_data:
+                        minimal_history.append({
+                            't': price['t'],
+                            'c': price['c'],
+                            'v': price['v']  # Include volume for recent data
+                        })
+                    
+                    historical_stocks.append({
+                        's': ticker,  # Shorter field name
+                        'h': minimal_history,  # Shorter field name
+                        'u': datetime.now().isoformat()  # Shorter field name
+                    })
+                    
+                    processed += 1
+                else:
+                    failed += 1
+            else:
+                failed += 1
+            
+            # Rate limiting - respect API limits (5 calls per second = 0.2 seconds between calls)
+            time.sleep(0.2)
+            
+        except Exception as e:
+            print(f"Error processing {ticker}: {e}")
+            failed += 1
+            continue
+    
+    print(f"\nProcessing complete!")
+    print(f"Successfully processed: {processed} stocks")
+    print(f"Failed: {failed} stocks")
     
     # Calculate percentile rankings
     if all_stock_data:
-        df = pd.DataFrame(all_stock_data)
-        df['rs_rank'] = pd.qcut(df['rs_score'].rank(method='first'), 99, labels=range(1, 100)).astype(int)
+        print("\nCalculating IBD-style RS percentile rankings...")
+        
+        # Sort by RS score and assign rankings
+        all_stock_data.sort(key=lambda x: x['rs_score'], reverse=True)
+        
+        # Assign percentile rankings (1-99)
+        total_stocks = len(all_stock_data)
+        for i, stock in enumerate(all_stock_data):
+            # Percentile: what percentage of stocks this stock beats
+            percentile = int(((total_stocks - i) / total_stocks) * 99) + 1
+            stock['rs_rank'] = min(percentile, 99)
         
         # Format for output
         output_data = []
-        for _, row in df.iterrows():
-            # Format volume as "XXXk" or "XXXm"
-            if row['avg_volume'] >= 1000000:
-                volume_str = f"{row['avg_volume']/1000000:.1f}M"
-            else:
-                volume_str = f"{row['avg_volume']/1000:.0f}k"
-            
+        for stock in all_stock_data:
             output_data.append({
-                'symbol': row['symbol'],
-                'rs_rank': int(row['rs_rank']),
-                'avg_volume': volume_str,
-                'raw_volume': int(row['avg_volume'])
+                'symbol': stock['symbol'],
+                'rs_rank': stock['rs_rank'],
+                'rs_score': round(stock['rs_score'], 4),
+                'avg_volume': format_volume(stock['avg_volume']),
+                'raw_volume': stock['avg_volume'],
+                'relative_3m': format_return(stock['relative_3m']),
+                'relative_12m': format_return(stock['relative_12m']),
+                'stock_return_3m': format_return(stock['stock_return_3m']),
+                'stock_return_12m': format_return(stock['stock_return_12m'])
             })
         
-        # Sort by RS rank (highest first)
-        output_data.sort(key=lambda x: x['rs_rank'], reverse=True)
+        # Save main rankings JSON file
+        output = {
+            'last_updated': datetime.now().isoformat(),
+            'formula_used': 'RS = 2×(3m relative vs S&P500) + 6m + 9m + 12m relative performance',
+            'total_stocks': len(output_data),
+            'benchmark': 'S&P 500 (SPY)',
+            'update_type': 'full_rebuild',
+            'data': output_data
+        }
         
-        # Save to JSON file
         with open('rankings.json', 'w') as f:
-            json.dump({
-                'last_updated': datetime.now().isoformat(),
-                'total_stocks': len(output_data),
-                'data': output_data
-            }, f, indent=2)
+            json.dump(output, f, indent=2)
         
-        print(f"Successfully processed {len(output_data)} stocks")
-        print("Data saved to rankings.json")
-    
+        print(f"✅ Successfully saved {len(output_data)} stocks to 'rankings.json'")
+        
+        # Save ultra-minimal historical data 
+        minimal_spy_data = []
+        # SPY data: every 5th day for older data, all recent 30 days
+        older_spy = sp500_data[:-30:5]
+        recent_spy = sp500_data[-30:]
+        
+        for bar in older_spy:
+            minimal_spy_data.append({'t': bar['t'], 'c': bar['c']})
+        for bar in recent_spy:
+            minimal_spy_data.append({'t': bar['t'], 'c': bar['c'], 'v': bar['v']})
+        
+        historical_output = {
+            'u': datetime.now().isoformat(),  # Shorter field names
+            's': minimal_spy_data,  # SPY data
+            'n': len(historical_stocks),  # Total stocks
+            'd': historical_stocks  # Stock data
+        }
+        
+        with open('historical_data.json', 'w') as f:
+            json.dump(historical_output, f, indent=2)
+        
+        print(f"✅ Historical data saved for daily updates ({len(historical_stocks)} stocks)")
+        
+        # Show top performers
+        print(f"\n🏆 Top 20 IBD-Style RS Rankings:")
+        print("Rank | Symbol | RS | 3M Rel | 12M Rel | Volume")
+        print("-" * 55)
+        for i, stock in enumerate(output_data[:20]):
+            print(f"{i+1:2d}   | {stock['symbol']:6s} | {stock['rs_rank']:2d} | {stock['relative_3m']:7s} | {stock['relative_12m']:8s} | {stock['avg_volume']:>8s}")
+        
+        # Show some statistics
+        rs_scores = [s['rs_score'] for s in all_stock_data]
+        print(f"\n📊 RS Score Statistics:")
+        print(f"   Highest RS Score: {max(rs_scores):.3f}")
+        print(f"   Lowest RS Score: {min(rs_scores):.3f}")
+        print(f"   Average RS Score: {np.mean(rs_scores):.3f}")
+        print(f"   Median RS Score: {np.median(rs_scores):.3f}")
+        
+        # Count high RS stocks
+        high_rs_count = len([s for s in output_data if s['rs_rank'] >= 90])
+        print(f"   Stocks with RS ≥ 90: {high_rs_count}")
+        
     else:
-        print("No stock data was successfully processed")
+        print("❌ No stock data was successfully processed")
+        print("Check your API key and internet connection.")
 
 if __name__ == "__main__":
     main()
