@@ -2,7 +2,7 @@ name: Daily RS Update
 
 on:
   schedule:
-    - cron: '30 21 * * 1-4'   # Mon-Thu 4:30 PM ET = daily update only
+    - cron: '30 22 * * 1-4'   # Mon-Thu 5:30 PM ET = daily update only
   workflow_dispatch:          # Manual trigger for daily update
 
 jobs:
