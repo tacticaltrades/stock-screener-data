@@ -1,4 +1,4 @@
-name: Stock Data Full Rebuild
+name: Update RS Data Full
 
 on:
   schedule:
