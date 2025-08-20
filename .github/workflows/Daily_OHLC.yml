@@ -1,0 +1,126 @@
+name: Daily OHLC Update
+
+on:
+  schedule:
+    # Runs Monday-Thursday at 4:30 PM EST (9:30 PM UTC)
+    - cron: '30 21 * * 1-4'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: write  # Required to push changes
+
+jobs:
+  daily-ohlc-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+    
+    - name: Check if historical data exists
+      run: |
+        if [ ! -f ohlc_historical.json ]; then
+          echo "Error: ohlc_historical.json not found!"
+          echo "Please run the weekly full rebuild first."
+          exit 1
+        fi
+        echo "Found ohlc_historical.json with $(jq '.total_symbols' ohlc_historical.json) symbols"
+        echo "Last updated: $(jq -r '.last_updated' ohlc_historical.json)"
+    
+    - name: Check if market is open (trading day)
+      run: |
+        # Simple check - if it's a weekday, assume market was open
+        # You could enhance this to check for market holidays
+        DAY_OF_WEEK=$(date +%u)
+        if [ $DAY_OF_WEEK -ge 1 ] && [ $DAY_OF_WEEK -le 5 ]; then
+          echo "✅ Trading day detected, proceeding with update"
+        else
+          echo "⚠️ Non-trading day, but proceeding anyway (manual trigger or schedule adjustment)"
+        fi
+    
+    - name: Run daily OHLC update
+      env:
+        POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      run: |
+        echo "Starting daily OHLC update at $(date)"
+        python process_ohlc_daily.py
+        echo "Daily OHLC update completed at $(date)"
+    
+    - name: Verify updated files
+      run: |
+        if [ -f ohlc.json ] && [ -f ohlc_historical.json ]; then
+          echo "✅ OHLC files updated successfully"
+          echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
+          echo "ohlc_historical.json size: $(du -h ohlc_historical.json | cut -f1)"
+          
+          # Verify JSON structure
+          echo "Verifying JSON structure..."
+          jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
+          jq -e '.data | keys | length' ohlc_historical.json > /dev/null && echo "✅ ohlc_historical.json structure valid"
+          
+          # Show update info
+          echo "Update summary:"
+          echo "- Total symbols: $(jq -r '.total_symbols' ohlc.json)"
+          echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
+          echo "- Update type: $(jq -r '.update_type' ohlc.json)"
+        else
+          echo "❌ OHLC files not found after update"
+          exit 1
+        fi
+    
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+    
+    - name: Check for changes and commit
+      run: |
+        git add ohlc.json ohlc_historical.json
+        
+        if git diff --staged --quiet; then
+          echo "No changes detected - market may be closed or no new data available"
+          echo "This is normal for weekends, holidays, or pre-market runs"
+        else
+          # Calculate file size changes
+          OLD_SIZE=$(git show HEAD:ohlc.json | wc -c 2>/dev/null || echo "0")
+          NEW_SIZE=$(wc -c < ohlc.json)
+          SIZE_DIFF=$((NEW_SIZE - OLD_SIZE))
+          
+          if [ $SIZE_DIFF -gt 0 ]; then
+            SIZE_CHANGE="+$(echo $SIZE_DIFF | numfmt --to=iec)"
+          else
+            SIZE_CHANGE="$(echo $SIZE_DIFF | numfmt --to=iec)"
+          fi
+          
+          git commit -m "Daily OHLC update - $(date -u '+%Y-%m-%d %H:%M:%S') UTC (${SIZE_CHANGE})"
+          git push
+          echo "✅ Changes committed and pushed successfully"
+        fi
+    
+    - name: Create workflow summary
+      run: |
+        echo "## Daily OHLC Update Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbols**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Last updated**: $(jq -r '.last_updated' ohlc.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Update type**: $(jq -r '.update_type' ohlc.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **File sizes**:" >> $GITHUB_STEP_SUMMARY
+        echo "  - ohlc.json: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "  - ohlc_historical.json: $(du -h ohlc_historical.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Check if files were updated
+        git diff --name-only HEAD~1 2>/dev/null | grep -q "ohlc" && UPDATE_STATUS="✅ Files updated" || UPDATE_STATUS="ℹ️ No changes (normal for non-trading days)"
+        echo "**Status**: ${UPDATE_STATUS}" >> $GITHUB_STEP_SUMMARY
