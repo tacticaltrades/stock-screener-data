@@ -158,7 +158,7 @@ class OHLCDailyProcessor:
         
         # Log file size
         ohlc_size = os.path.getsize('ohlc.json') / (1024 * 1024)  # MB
-        logger.info(f"File size: ohlc.json={ohlc_size:.1f}MB")d ohlc_historical.json")
+        logger.info(f"File size: ohlc.json={ohlc_size:.1f}MB")
         
         # Log file sizes
         ohlc_size = os.path.getsize('ohlc.json') / (1024 * 1024)  # MB
