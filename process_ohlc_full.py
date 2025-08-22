@@ -55,12 +55,6 @@ class OHLCFullProcessor:
                 "multiplier": 1,
                 "timespan": "week"
             },
-            "1M": {
-                "from": (today - timedelta(days=730)).strftime("%Y-%m-%d"),  # 2 years of monthly data
-                "to": today.strftime("%Y-%m-%d"),
-                "multiplier": 1,
-                "timespan": "month"
-            }
         }
     
     def fetch_ohlc_data(self, symbol: str, timeframe: str, date_range: Dict) -> List[Dict]:
