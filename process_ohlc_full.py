@@ -33,7 +33,7 @@ class OHLCFullProcessor:
                 rankings_data = json.load(f)
             symbols = [item['symbol'] for item in rankings_data['data']]
             logger.info(f"Loaded {len(symbols)} symbols from rankings.json")
-            return ["AAPL"]
+            return symbols
         except Exception as e:
             logger.error(f"Failed to load symbols: {e}")
             return []
