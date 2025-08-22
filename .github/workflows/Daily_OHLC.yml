@@ -18,6 +18,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
+        lfs: true  # Enable LFS checkout
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -28,6 +29,11 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install requests
+    
+    - name: Setup Git LFS
+      run: |
+        git lfs install
+        git lfs pull  # Ensure all LFS files are downloaded
     
     - name: Check if existing data exists
       run: |
