@@ -63,15 +63,60 @@ class OHLCFullProcessor:
             }
         }
     
-    def fetch_ohlc_data(self, symbol: str, timeframe: str, date_range: Dict) -> List[Dict]:
-        """Fetch OHLC data for a symbol and timeframe"""
-        url = f"{self.base_url}/aggs/ticker/{symbol}/range/{date_range['multiplier']}/{date_range['timespan']}/{date_range['from']}/{date_range['to']}"
+def fetch_ohlc_data(self, symbol: str, timeframe: str, date_range: Dict) -> List[Dict]:
+    """Fetch OHLC data for a symbol and timeframe"""
+    url = f"{self.base_url}/aggs/ticker/{symbol}/range/{date_range['multiplier']}/{date_range['timespan']}/{date_range['from']}/{date_range['to']}"
+    
+    # Debug the first few requests
+    if symbol in ['AAPL', 'MSFT', 'GOOGL']:  # Test with known good symbols
+        logger.info(f"DEBUG: Fetching {symbol} {timeframe}")
+        logger.info(f"DEBUG: URL = {url}")
+        logger.info(f"DEBUG: Date range = {date_range}")
+    
+    params = {
+        'apikey': self.api_key,
+        'adjusted': 'true',
+        'sort': 'asc'
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
         
-        params = {
-            'apikey': self.api_key,
-            'adjusted': 'true',
-            'sort': 'asc'
-        }
+        # Debug the response for test symbols
+        if symbol in ['AAPL', 'MSFT', 'GOOGL']:
+            logger.info(f"DEBUG: {symbol} response status = {data.get('status')}")
+            logger.info(f"DEBUG: {symbol} has results = {'results' in data}")
+            if 'results' in data:
+                logger.info(f"DEBUG: {symbol} results count = {len(data['results'])}")
+        
+        if data.get('status') == 'OK' and 'results' in data:
+            # Transform to consistent format
+            ohlc_data = []
+            for bar in data['results']:
+                ohlc_data.append({
+                    'timestamp': bar['t'],
+                    'open': bar['o'],
+                    'high': bar['h'],
+                    'low': bar['l'],
+                    'close': bar['c'],
+                    'volume': bar['v'],
+                    'date': datetime.fromtimestamp(bar['t'] / 1000).strftime('%Y-%m-%d')
+                })
+            
+            logger.info(f"Fetched {len(ohlc_data)} bars for {symbol} {timeframe}")
+            return ohlc_data
+        else:
+            logger.warning(f"No data for {symbol} {timeframe}: {data.get('message', 'Unknown error')}")
+            return []
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request failed for {symbol} {timeframe}: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Error processing {symbol} {timeframe}: {e}")
+        return []
         
         try:
             response = requests.get(url, params=params, timeout=30)
