@@ -90,13 +90,12 @@ class OHLCFullProcessor:
                 ohlc_data = []
                 for bar in data['results']:
                     ohlc_data.append({
-                        'timestamp': bar['t'],
-                        'open': bar['o'],
-                        'high': bar['h'],
-                        'low': bar['l'],
-                        'close': bar['c'],
-                        'volume': bar['v'],
-                        'date': datetime.fromtimestamp(bar['t'] / 1000).strftime('%Y-%m-%d')
+                        't': bar['t'],
+                        'o': round(bar['o'], 2),
+                        'h': round(bar['h'], 2),
+                        'l': round(bar['l'], 2),
+                        'c': round(bar['c'], 2),
+                        'v': int(bar['v']),
                     })
                 
                 logger.info(f"Fetched {len(ohlc_data)} bars for {symbol} {timeframe}")
