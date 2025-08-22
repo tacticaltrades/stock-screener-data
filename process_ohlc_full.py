@@ -91,7 +91,7 @@ class OHLCFullProcessor:
                 if 'results' in data:
                     logger.info(f"DEBUG: {symbol} results count = {len(data['results'])}")
             
-            if data.get('status') == 'OK' and 'results' in data:
+            if data.get('status') in ['OK', 'DELAYED'] and 'results' in data:
                 # Transform to consistent format
                 ohlc_data = []
                 for bar in data['results']:
