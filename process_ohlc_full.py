@@ -151,7 +151,7 @@ class OHLCFullProcessor:
             "last_updated": timestamp,
             "update_type": "full_rebuild",
             "total_symbols": len(data),
-            "timeframes": ["1D", "1W", "1M"],
+            "timeframes": ["1D", "1W"],
             "data": data
         }
         
