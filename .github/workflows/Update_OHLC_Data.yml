@@ -27,10 +27,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
     
-    - name: Setup Git LFS
+    - name: Setup Git LFS and convert existing files
       run: |
         git lfs install
-        git lfs pull  # Ensure all LFS files are downloaded
+        git lfs track "*.json"
+        git add .gitattributes
+        git rm --cached ohlc.json historical_data.json rankings.json || true
+        git lfs pull
+
+        
     
     - name: Check if rankings.json exists
       run: |
