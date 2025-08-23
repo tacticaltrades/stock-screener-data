@@ -33,11 +33,46 @@ class OHLCFullProcessor:
     def load_symbols(self) -> List[str]:
         """Load symbols from rankings.json"""
         try:
+            logger.info("Attempting to load rankings.json...")
             with open('rankings.json', 'r') as f:
                 rankings_data = json.load(f)
-            symbols = [item['symbol'] for item in rankings_data['data']]
-            logger.info(f"Loaded {len(symbols)} symbols from rankings.json")
+            
+            logger.info(f"Rankings data keys: {list(rankings_data.keys())}")
+            logger.info(f"Data type: {type(rankings_data.get('data', 'NOT_FOUND'))}")
+            
+            if 'data' not in rankings_data:
+                logger.error("'data' key not found in rankings.json")
+                return []
+            
+            if not isinstance(rankings_data['data'], list):
+                logger.error(f"'data' is not a list, it's: {type(rankings_data['data'])}")
+                return []
+            
+            logger.info(f"Found {len(rankings_data['data'])} items in data array")
+            
+            symbols = []
+            for i, item in enumerate(rankings_data['data'][:5]):  # Check first 5 items
+                logger.info(f"Item {i}: {item}")
+                if 'symbol' in item:
+                    symbols.append(item['symbol'])
+                else:
+                    logger.error(f"Item {i} missing 'symbol' key: {item}")
+            
+            # Load all symbols if the first 5 look good
+            if len(symbols) == 5:
+                symbols = [item['symbol'] for item in rankings_data['data'] if 'symbol' in item]
+            
+            logger.info(f"Successfully loaded {len(symbols)} symbols from rankings.json")
+            if len(symbols) > 0:
+                logger.info(f"First few symbols: {symbols[:10]}")
             return symbols
+            
+        except FileNotFoundError:
+            logger.error("rankings.json file not found")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in rankings.json: {e}")
+            return []
         except Exception as e:
             logger.error(f"Failed to load symbols: {e}")
             return []
