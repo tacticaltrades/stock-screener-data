@@ -15,7 +15,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
-        lfs: true  # Enable LFS checkout
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -26,16 +25,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install requests
-    
-    - name: Setup Git LFS and convert existing files
-      run: |
-        git lfs install
-        git lfs track "*.json"
-        git add .gitattributes
-        git rm --cached ohlc.json historical_data.json rankings.json || true
-        git lfs pull
-
-        
     
     - name: Check if rankings.json exists
       run: |
@@ -55,21 +44,33 @@ jobs:
     
     - name: Verify generated files
       run: |
-        if [ -f ohlc.json ]; then
-          echo "✅ OHLC file generated successfully"
-          echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
+        # Check for split OHLC files
+        OHLC_FILES=$(ls ohlc_*.json 2>/dev/null | wc -l)
+        if [ $OHLC_FILES -gt 0 ]; then
+          echo "✅ OHLC files generated successfully"
+          echo "Generated $OHLC_FILES OHLC split files:"
+          ls -lh ohlc_*.json | awk '{print $9 ": " $5}'
           
-          # Verify JSON structure
-          echo "Verifying JSON structure..."
-          jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
-          
-          # Show summary stats
-          echo "Summary:"
-          echo "- Total symbols: $(jq -r '.total_symbols' ohlc.json)"
-          echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
-          echo "- Update type: $(jq -r '.update_type' ohlc.json)"
+          # Verify index file
+          if [ -f ohlc_index.json ]; then
+            echo "✅ OHLC index file generated"
+            echo "Index file size: $(du -h ohlc_index.json | cut -f1)"
+            
+            # Verify JSON structure of index
+            jq -e '.files | length' ohlc_index.json > /dev/null && echo "✅ ohlc_index.json structure valid"
+            
+            # Show summary stats
+            echo "Summary:"
+            echo "- Total symbols: $(jq -r '.total_symbols' ohlc_index.json)"
+            echo "- Last updated: $(jq -r '.last_updated' ohlc_index.json)"
+            echo "- Update type: $(jq -r '.update_type' ohlc_index.json)"
+            echo "- Split files: $(jq -r '.files | length' ohlc_index.json)"
+          else
+            echo "❌ OHLC index file not found"
+            exit 1
+          fi
         else
-          echo "❌ OHLC file not found after rebuild"
+          echo "❌ No OHLC split files found after rebuild"
           exit 1
         fi
     
@@ -80,12 +81,16 @@ jobs:
     
     - name: Commit and push changes
       run: |
-        git add ohlc.json
+        # Add all OHLC related files
+        git add ohlc_*.json ohlc_index.json
+        
+        # Remove old single file if it exists
+        git rm ohlc.json 2>/dev/null || true
         
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "Weekly OHLC data full rebuild - $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+          git commit -m "Weekly OHLC data full rebuild (split files) - $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
           git push
           echo "✅ Changes committed and pushed successfully"
         fi
@@ -94,8 +99,14 @@ jobs:
       run: |
         echo "## OHLC Full Rebuild Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
-        echo "- **Symbols processed**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **File size**: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbols processed**: $(jq -r '.total_symbols' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Split files**: $(jq -r '.files | length' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Total size**: $(du -ch ohlc_*.json | tail -1 | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "- **Update type**: Full rebuild" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### File Details:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        ls -lh ohlc_*.json | awk '{print $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "✅ Weekly OHLC data rebuild completed successfully" >> $GITHUB_STEP_SUMMARY
