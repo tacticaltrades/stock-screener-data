@@ -1,4 +1,4 @@
-name: Update OHLC Data (Debug)
+name: Update OHLC Data
 on:
   schedule:
     # Runs every Friday at 4:30 PM EST (9:30 PM UTC)
@@ -25,174 +25,73 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install requests
-        # Verify jq is available (should be pre-installed)
-        which jq || sudo apt-get update && sudo apt-get install -y jq
     
-    - name: Debug environment
+    - name: Fix JSON formatting issues
       run: |
-        echo "=== Environment Debug ==="
-        echo "Current directory: $(pwd)"
-        echo "Files in directory:"
-        ls -la
-        echo ""
-        echo "Python version: $(python --version)"
-        echo "Pip packages:"
-        pip list
-        echo ""
-        echo "Environment variables (API key check):"
-        if [ -n "$POLYGON_API_KEY" ]; then
-          echo "✅ POLYGON_API_KEY is set (length: ${#POLYGON_API_KEY})"
-        else
-          echo "❌ POLYGON_API_KEY is NOT set"
-        fi
-      env:
-        POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        # Try to fix common JSON issues with Python
+        python3 -c "
+        import json
+        import sys
+        try:
+            print('Attempting to fix rankings.json...')
+            with open('rankings.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            with open('rankings.json', 'w', encoding='utf-8') as f:
+                json.dump(data, f, separators=(',', ':'), ensure_ascii=True)
+            print('✅ JSON cleaned and re-saved')
+            print(f'Found {len(data.get(\"data\", []))} stocks in rankings.json')
+        except Exception as e:
+            print(f'❌ JSON fix failed: {e}')
+            sys.exit(1)
+        "
     
-    - name: Check if rankings.json exists and validate
+    - name: Check if rankings.json exists
       run: |
         if [ ! -f rankings.json ]; then
-          echo "❌ Error: rankings.json not found!"
+          echo "Error: rankings.json not found!"
           exit 1
         fi
-        
-        echo "✅ Found rankings.json"
-        echo "File size: $(du -h rankings.json | cut -f1)"
-        
-        # Validate JSON structure
-        if jq -e '.data | length' rankings.json > /dev/null 2>&1; then
-          STOCK_COUNT=$(jq '.data | length' rankings.json)
-          echo "✅ JSON structure valid with $STOCK_COUNT stocks"
-          
-          # Show first few symbols
-          echo "First 5 symbols:"
-          jq -r '.data[:5] | .[] | .symbol' rankings.json
-        else
-          echo "❌ JSON structure invalid"
-          echo "JSON validation error:"
-          jq '.data | length' rankings.json
-          exit 1
-        fi
+        echo "Found rankings.json with $(jq '.data | length' rankings.json) stocks"
     
-    - name: Run OHLC full rebuild (with detailed logging)
+    - name: Run OHLC full rebuild
       env:
         POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
       run: |
-        echo "=== Starting OHLC full rebuild at $(date) ==="
-        echo "Python script: process_ohlc_full.py"
-        echo ""
-        
-        # Check if script exists
-        if [ ! -f process_ohlc_full.py ]; then
-          echo "❌ Python script not found!"
-          ls -la *.py
-          exit 1
-        fi
-        
-        echo "✅ Python script found"
-        echo "Script size: $(du -h process_ohlc_full.py | cut -f1)"
-        echo ""
-        
-        # Run with explicit error handling
-        if python process_ohlc_full.py; then
-          echo "✅ Python script completed successfully"
-        else
-          echo "❌ Python script failed with exit code $?"
-          echo "Last 50 lines of any log files:"
-          tail -n 50 *.log 2>/dev/null || echo "No log files found"
-          exit 1
-        fi
-        
-        echo "=== OHLC full rebuild completed at $(date) ==="
+        echo "Starting OHLC full rebuild at $(date)"
+        python process_ohlc_full.py
+        echo "OHLC full rebuild completed at $(date)"
     
-    - name: Debug output files
+    - name: Verify generated files
       run: |
-        echo "=== Output Files Debug ==="
-        echo "All files in directory after script:"
-        ls -la
-        echo ""
-        
-        # Check for any OHLC files
-        echo "OHLC-related files:"
-        ls -la ohlc* 2>/dev/null || echo "No ohlc* files found"
-        echo ""
-        
-        # Check for any JSON files
-        echo "All JSON files:"
-        ls -la *.json
-        echo ""
-        
-        # Check file sizes
-        echo "File sizes:"
-        du -h *.json 2>/dev/null || echo "No JSON files to measure"
-    
-    - name: Verify generated files (enhanced)
-      run: |
-        echo "=== File Verification ==="
-        
         # Check for split OHLC files
         OHLC_FILES=$(ls ohlc_*.json 2>/dev/null | wc -l)
-        echo "Found $OHLC_FILES OHLC split files"
-        
         if [ $OHLC_FILES -gt 0 ]; then
           echo "✅ OHLC files generated successfully"
-          echo "Generated files:"
-          ls -lh ohlc_*.json | awk '{print "  " $9 ": " $5}'
-          
-          # Test first file content
-          FIRST_FILE=$(ls ohlc_*.json | head -1)
-          echo ""
-          echo "Sample content from $FIRST_FILE:"
-          if jq -e '.data | keys | length' "$FIRST_FILE" > /dev/null 2>&1; then
-            SYMBOL_COUNT=$(jq '.data | keys | length' "$FIRST_FILE")
-            echo "  ✅ Contains $SYMBOL_COUNT symbols"
-            echo "  Sample symbols: $(jq -r '.data | keys[:3] | join(", ")' "$FIRST_FILE")"
-            
-            # Check if symbols have data
-            FIRST_SYMBOL=$(jq -r '.data | keys[0]' "$FIRST_FILE")
-            TIMEFRAMES=$(jq -r ".data[\"$FIRST_SYMBOL\"] | keys | join(\", \")" "$FIRST_FILE")
-            echo "  Timeframes: $TIMEFRAMES"
-            
-            # Check data points
-            DAILY_COUNT=$(jq -r ".data[\"$FIRST_SYMBOL\"][\"1D\"] | length" "$FIRST_FILE" 2>/dev/null || echo "0")
-            echo "  Daily bars for $FIRST_SYMBOL: $DAILY_COUNT"
-            
-          else
-            echo "  ❌ File structure invalid"
-            echo "  File content preview:"
-            head -n 10 "$FIRST_FILE"
-          fi
+          echo "Generated $OHLC_FILES OHLC split files:"
+          ls -lh ohlc_*.json | awk '{print $9 ": " $5}'
           
           # Verify index file
           if [ -f ohlc_index.json ]; then
-            echo ""
             echo "✅ OHLC index file generated"
             echo "Index file size: $(du -h ohlc_index.json | cut -f1)"
             
             # Verify JSON structure of index
-            if jq -e '.files | length' ohlc_index.json > /dev/null 2>&1; then
-              echo "✅ ohlc_index.json structure valid"
-              
-              # Show summary stats
-              echo ""
-              echo "Summary from index:"
-              echo "- Total symbols: $(jq -r '.total_symbols // "N/A"' ohlc_index.json)"
-              echo "- Last updated: $(jq -r '.last_updated // "N/A"' ohlc_index.json)"
-              echo "- Update type: $(jq -r '.update_type // "N/A"' ohlc_index.json)"
-              echo "- Split files: $(jq -r '.files | length // "N/A"' ohlc_index.json)"
-            else
-              echo "❌ ohlc_index.json structure invalid"
-              echo "Index file content preview:"
-              head -n 10 ohlc_index.json
-              exit 1
-            fi
+            jq -e '.files | length' ohlc_index.json > /dev/null && echo "✅ ohlc_index.json structure valid"
+            
+            # Show summary stats
+            echo "Summary:"
+            echo "- Total symbols: $(jq -r '.total_symbols' ohlc_index.json)"
+            echo "- Last updated: $(jq -r '.last_updated' ohlc_index.json)"
+            echo "- Update type: $(jq -r '.update_type' ohlc_index.json)"
+            echo "- Split files: $(jq -r '.files | length' ohlc_index.json)"
           else
             echo "❌ OHLC index file not found"
             exit 1
           fi
         else
           echo "❌ No OHLC split files found after rebuild"
-          echo "This indicates the Python script didn't generate output files"
-          echo "Check if there were any errors in the Python script execution above"
+          echo "This might indicate an issue with the Python script"
+          echo "Check Python script logs above for errors"
           exit 1
         fi
     
@@ -221,14 +120,14 @@ jobs:
       run: |
         echo "## OHLC Full Rebuild Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
-        echo "- **Symbols processed**: $(jq -r '.total_symbols // "N/A"' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Split files**: $(jq -r '.files | length // "N/A"' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Total size**: $(du -ch ohlc_*.json 2>/dev/null | tail -1 | cut -f1 || echo "N/A")" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbols processed**: $(jq -r '.total_symbols' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Split files**: $(jq -r '.files | length' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Total size**: $(du -ch ohlc_*.json | tail -1 | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "- **Update type**: Full rebuild" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### File Details:" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-        ls -lh ohlc_*.json 2>/dev/null | awk '{print $9 ": " $5}' || echo "No files generated" >> $GITHUB_STEP_SUMMARY
+        ls -lh ohlc_*.json | awk '{print $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "✅ Weekly OHLC data rebuild completed successfully" >> $GITHUB_STEP_SUMMARY
