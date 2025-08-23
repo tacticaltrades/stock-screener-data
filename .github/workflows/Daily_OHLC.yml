@@ -37,13 +37,14 @@ jobs:
     
     - name: Check if existing data exists
       run: |
-        if [ ! -f ohlc.json ]; then
-          echo "Error: ohlc.json not found!"
+        if [ ! -f ohlc_index.json ]; then
+          echo "Error: ohlc_index.json not found!"
           echo "Please run the weekly full rebuild first."
           exit 1
         fi
-        echo "Found ohlc.json with $(jq '.total_symbols' ohlc.json) symbols"
-        echo "Last updated: $(jq -r '.last_updated' ohlc.json)"
+        echo "Found ohlc_index.json with $(jq '.total_symbols' ohlc_index.json) symbols"
+        echo "Last updated: $(jq -r '.last_updated' ohlc_index.json)"
+        echo "Split files: $(jq -r '.files | length' ohlc_index.json)"
     
     - name: Check if market is open (trading day)
       run: |
@@ -66,21 +67,24 @@ jobs:
     
     - name: Verify updated files
       run: |
-        if [ -f ohlc.json ]; then
-          echo "✅ OHLC file updated successfully"
-          echo "ohlc.json size: $(du -h ohlc.json | cut -f1)"
+        OHLC_FILES=$(ls ohlc_*.json 2>/dev/null | wc -l)
+        if [ $OHLC_FILES -gt 0 ] && [ -f ohlc_index.json ]; then
+          echo "✅ OHLC files updated successfully"
+          echo "Total split files: $OHLC_FILES"
+          echo "Total size: $(du -ch ohlc_*.json | tail -1 | cut -f1)"
           
-          # Verify JSON structure
+          # Verify JSON structure of index
           echo "Verifying JSON structure..."
-          jq -e '.data | keys | length' ohlc.json > /dev/null && echo "✅ ohlc.json structure valid"
+          jq -e '.files | length' ohlc_index.json > /dev/null && echo "✅ ohlc_index.json structure valid"
           
           # Show update info
           echo "Update summary:"
-          echo "- Total symbols: $(jq -r '.total_symbols' ohlc.json)"
-          echo "- Last updated: $(jq -r '.last_updated' ohlc.json)"
-          echo "- Update type: $(jq -r '.update_type' ohlc.json)"
+          echo "- Total symbols: $(jq -r '.total_symbols' ohlc_index.json)"
+          echo "- Last updated: $(jq -r '.last_updated' ohlc_index.json)"
+          echo "- Update type: $(jq -r '.update_type' ohlc_index.json)"
+          echo "- Split files: $(jq -r '.files | length' ohlc_index.json)"
         else
-          echo "❌ OHLC file not found after update"
+          echo "❌ OHLC files not found after update"
           exit 1
         fi
     
@@ -91,15 +95,28 @@ jobs:
     
     - name: Check for changes and commit
       run: |
-        git add ohlc.json
+        # Add all OHLC related files
+        git add ohlc_*.json ohlc_index.json
+        
+        # Remove old single file if it exists
+        git rm ohlc.json 2>/dev/null || true
         
         if git diff --staged --quiet; then
           echo "No changes detected - market may be closed or no new data available"
           echo "This is normal for weekends, holidays, or pre-market runs"
         else
-          # Calculate file size changes
-          OLD_SIZE=$(git show HEAD:ohlc.json | wc -c 2>/dev/null || echo "0")
-          NEW_SIZE=$(wc -c < ohlc.json)
+          # Calculate total file size changes
+          OLD_SIZE=0
+          NEW_SIZE=0
+          
+          for file in ohlc_*.json ohlc_index.json; do
+            if [ -f "$file" ]; then
+              NEW_SIZE=$((NEW_SIZE + $(wc -c < "$file")))
+              OLD_FILE_SIZE=$(git show HEAD:"$file" 2>/dev/null | wc -c || echo "0")
+              OLD_SIZE=$((OLD_SIZE + OLD_FILE_SIZE))
+            fi
+          done
+          
           SIZE_DIFF=$((NEW_SIZE - OLD_SIZE))
           
           if [ $SIZE_DIFF -gt 0 ]; then
@@ -108,7 +125,7 @@ jobs:
             SIZE_CHANGE="$(echo $SIZE_DIFF | numfmt --to=iec)"
           fi
           
-          git commit -m "Daily OHLC update - $(date -u '+%Y-%m-%d %H:%M:%S') UTC (${SIZE_CHANGE})"
+          git commit -m "Daily OHLC update (split files) - $(date -u '+%Y-%m-%d %H:%M:%S') UTC (${SIZE_CHANGE})"
           git push
           echo "✅ Changes committed and pushed successfully"
         fi
@@ -117,12 +134,19 @@ jobs:
       run: |
         echo "## Daily OHLC Update Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" >> $GITHUB_STEP_SUMMARY
-        echo "- **Symbols**: $(jq -r '.total_symbols' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Last updated**: $(jq -r '.last_updated' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Update type**: $(jq -r '.update_type' ohlc.json)" >> $GITHUB_STEP_SUMMARY
-        echo "- **File size**: $(du -h ohlc.json | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbols**: $(jq -r '.total_symbols' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Last updated**: $(jq -r '.last_updated' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Update type**: $(jq -r '.update_type' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Split files**: $(jq -r '.files | length' ohlc_index.json)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Total size**: $(du -ch ohlc_*.json | tail -1 | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Check if files were updated
-        git diff --name-only HEAD~1 2>/dev/null | grep -q "ohlc" && UPDATE_STATUS="✅ File updated" || UPDATE_STATUS="ℹ️ No changes (normal for non-trading days)"
+        git diff --name-only HEAD~1 2>/dev/null | grep -q "ohlc" && UPDATE_STATUS="✅ Files updated" || UPDATE_STATUS="ℹ️ No changes (normal for non-trading days)"
         echo "**Status**: ${UPDATE_STATUS}" >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### File Details:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        ls -lh ohlc_*.json | awk '{print $9 ": " $5}' >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
