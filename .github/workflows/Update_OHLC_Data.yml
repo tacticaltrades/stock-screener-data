@@ -26,23 +26,95 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
     
-    - name: Fix JSON formatting issues
+    - name: Comprehensive file debugging
       run: |
-        # Try to fix common JSON issues with Python
+        echo "=== Complete File System Debug ==="
+        echo "Current working directory: $(pwd)"
+        echo "User: $(whoami)"
+        echo ""
+        
+        echo "=== All files in directory ==="
+        ls -la
+        echo ""
+        
+        echo "=== Looking for JSON files ==="
+        find . -name "*.json" -type f 2>/dev/null | head -10
+        echo ""
+        
+        echo "=== Checking rankings.json specifically ==="
+        if [ -f rankings.json ]; then
+          echo "✅ rankings.json EXISTS"
+          echo "File permissions: $(ls -l rankings.json)"
+          echo "File size: $(wc -c < rankings.json) bytes"
+          echo "File type: $(file rankings.json)"
+          
+          # Check if readable
+          if [ -r rankings.json ]; then
+            echo "✅ File is readable"
+            
+            # Show raw content with different methods
+            echo ""
+            echo "=== Raw content (first 500 chars) ==="
+            head -c 500 rankings.json
+            echo ""
+            echo "=== End of raw content ==="
+            
+            echo ""
+            echo "=== Hex dump (first 100 bytes) ==="
+            xxd -l 100 rankings.json
+            
+            echo ""
+            echo "=== Character analysis ==="
+            echo "First character ASCII value: $(head -c 1 rankings.json | od -An -tu1)"
+            echo "Last character ASCII value: $(tail -c 1 rankings.json | od -An -tu1)"
+            
+          else
+            echo "❌ File is not readable!"
+          fi
+        else
+          echo "❌ rankings.json DOES NOT EXIST"
+        fi
+        
+        echo ""
+        echo "=== Python JSON test ==="
         python3 -c "
         import json
         import sys
-        try:
-            print('Attempting to fix rankings.json...')
-            with open('rankings.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            with open('rankings.json', 'w', encoding='utf-8') as f:
-                json.dump(data, f, separators=(',', ':'), ensure_ascii=True)
-            print('✅ JSON cleaned and re-saved')
-            print(f'Found {len(data.get(\"data\", []))} stocks in rankings.json')
-        except Exception as e:
-            print(f'❌ JSON fix failed: {e}')
-            sys.exit(1)
+        import os
+        
+        print('Python working directory:', os.getcwd())
+        print('Files Python can see:', [f for f in os.listdir('.') if f.endswith('.json')])
+        
+        if os.path.exists('rankings.json'):
+            print('✅ Python can see rankings.json')
+            
+            try:
+                stat = os.stat('rankings.json')
+                print(f'File size from Python: {stat.st_size} bytes')
+                print(f'File mode: {oct(stat.st_mode)}')
+                
+                # Try to read
+                with open('rankings.json', 'rb') as f:  # Read as binary first
+                    raw_bytes = f.read(100)
+                print(f'First 100 bytes (hex): {raw_bytes.hex()}')
+                print(f'First 100 bytes (repr): {repr(raw_bytes)}')
+                
+                # Try to read as text
+                with open('rankings.json', 'r', encoding='utf-8') as f:
+                    content = f.read(200)
+                print(f'First 200 chars as text: {repr(content)}')
+                
+                # Try JSON parse
+                with open('rankings.json', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                print(f'✅ JSON parsed successfully! Found {len(data.get(\"data\", []))} stocks')
+                
+            except Exception as e:
+                print(f'❌ Python error: {type(e).__name__}: {e}')
+                import traceback
+                traceback.print_exc()
+        else:
+            print('❌ Python cannot see rankings.json')
         "
     
     - name: Check if rankings.json exists
